@@ -180,7 +180,7 @@ func registerMetrics() (err error) {
 		}
 
 		for metric, config := range configs {
-			metricName := name + "-" + metric
+			metricName := strings.Replace(name + "_" + metric, "-","_",-1)
 			desc := graphConfig["graph_title"] + ": " + config["label"]
 			if config["info"] != "" {
 				desc = desc + ", " + config["info"]
@@ -233,7 +233,7 @@ func fetchMetrics() (err error) {
 				log.Printf("Couldn't parse value in line %s, malformed?", line)
 				continue
 			}
-			name := graph + "-" + key
+			name := strings.Replace(graph + "_" + key, "-","_",-1)
 			log.Printf("%s: %f\n", name, value)
 			gaugePerMetric[name].WithLabelValues(hostname).Set(value)
 		}
