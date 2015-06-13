@@ -194,8 +194,9 @@ func registerMetrics() (err error) {
         	                        prometheus.CounterOpts{
                 	                        Name: metricName,
                         	                Help: desc,
+						ConstLabels: prometheus.Labels{"type":muninType},
                                 	},
-                                	[]string{"hostname"},
+                                	[]string{"hostname","graphname","muninlabel"},
                         	)
 				log.Printf("Registered counter %s: %s", metricName, desc)
                         	counterPerMetric[metricName] = gv
@@ -206,8 +207,9 @@ func registerMetrics() (err error) {
                                 	prometheus.GaugeOpts{
                                         	Name: metricName,
 	                                        Help: desc,
+						ConstLabels: prometheus.Labels{"type":"counter"},
                 	                },
-                        	        []string{"hostname"},
+                        	        []string{"hostname","graphname","muninlabel"},
                         	)
 				log.Printf("Registered gauge %s: %s", metricName, desc)
         	                gaugePerMetric[metricName] = gv
@@ -255,9 +257,9 @@ func fetchMetrics() (err error) {
 			log.Printf("%s: %f\n", name, value)
 			_, isGauge := gaugePerMetric[name]
 			if isGauge {
-	                        gaugePerMetric[name].WithLabelValues(hostname).Set(value)
+	                        gaugePerMetric[name].WithLabelValues(hostname, graph, key).Set(value)
 			} else {
-				counterPerMetric[name].WithLabelValues(hostname).Set(value)
+				counterPerMetric[name].WithLabelValues(hostname, graph, key).Set(value)
 			}
 		}
 	}
