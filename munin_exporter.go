@@ -156,13 +156,13 @@ func muninConfig(name string) (config map[string]map[string]string, graphConfig 
 		key, value := parts[0], strings.TrimRight(strings.Join(parts[1:], " "), "\n")
 
 		keyParts := strings.Split(key, ".")
-		if len(key_parts) > 1 { // it's a metric config (metric.label etc)
-			if _, ok := config[key_parts[0]]; !ok { //FIXME: is there no better way?
-				config[key_parts[0]] = make(map[string]string)
+		if len(keyParts) > 1 { // it's a metric config (metric.label etc)
+			if _, ok := config[keyParts[0]]; !ok { //FIXME: is there no better way?
+				config[keyParts[0]] = make(map[string]string)
 			}
-			config[key_parts[0]][key_parts[1]] = value
+			config[keyParts[0]][keyParts[1]] = value
 		} else {
-			graphConfig[key_parts[0]] = value
+			graphConfig[keyParts[0]] = value
 		}
 	}
 	return
