@@ -207,7 +207,7 @@ func registerMetrics() (err error) {
                                 	prometheus.GaugeOpts{
                                         	Name: metricName,
 	                                        Help: desc,
-						ConstLabels: prometheus.Labels{"type":"counter"},
+						ConstLabels: prometheus.Labels{"type":"gauge"},
                 	                },
                         	        []string{"hostname","graphname","muninlabel"},
                         	)
