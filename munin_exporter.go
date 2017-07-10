@@ -259,7 +259,7 @@ func fetchMetrics() (err error) {
 			if isGauge {
 	                        gaugePerMetric[name].WithLabelValues(hostname, graph, key).Set(value)
 			} else {
-				counterPerMetric[name].WithLabelValues(hostname, graph, key).Set(value)
+				counterPerMetric[name].WithLabelValues(hostname, graph, key).Add(value)
 			}
 		}
 	}
