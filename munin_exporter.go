@@ -257,9 +257,9 @@ func fetchMetrics() (err error) {
 			log.Printf("%s: %f\n", name, value)
 			_, isGauge := gaugePerMetric[name]
 			if isGauge {
-	                        gaugePerMetric[name].WithLabelValues(hostname, graph, key).Set(value)
+	      gaugePerMetric[name].WithLabelValues(hostname, graph, key).Set(value)
 			} else {
-				counterPerMetric[name].WithLabelValues(hostname, graph, key).Set(value)
+				counterPerMetric[name].WithLabelValues(hostname, graph, key).Add(value)
 			}
 		}
 	}
