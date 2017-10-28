@@ -23,6 +23,7 @@ const (
 
 var (
 	listeningAddress    = flag.String("listeningAddress", ":8080", "Address on which to expose Prometheus metrics.")
+	listeningPath       = flag.String("listeningPath", "/metrics", "Path on which to expose Prometheus metrics.")
 	muninAddress        = flag.String("muninAddress", "localhost:4949", "munin-node address.")
 	muninScrapeInterval = flag.Int("muninScrapeInterval", 60, "Interval in seconds between scrapes.")
 	globalConn          net.Conn
@@ -47,7 +48,7 @@ func init() {
 }
 
 func serveStatus() {
-	http.Handle("/metrics", prometheus.Handler())
+	http.Handle(*listeningPath, prometheus.Handler())
 	http.ListenAndServe(*listeningAddress, nil)
 }
 
