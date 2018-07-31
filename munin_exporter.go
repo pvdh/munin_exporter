@@ -26,6 +26,7 @@ var (
 	listeningPath       = flag.String("listeningPath", "/metrics", "Path on which to expose Prometheus metrics.")
 	muninAddress        = flag.String("muninAddress", "localhost:4949", "munin-node address.")
 	muninScrapeInterval = flag.Int("muninScrapeInterval", 60, "Interval in seconds between scrapes.")
+	quite				= flag.Bool("quite", false, "Makes logging a bit more quite")
 	globalConn          net.Conn
 	hostname            string
 	graphs              []string
@@ -239,7 +240,9 @@ func fetchMetrics() (err error) {
 				return err
 			}
 			if len(line) == 1 && line[0] == '.' {
-				log.Printf("End of list")
+				if !*quite {
+					log.Printf("End of list")
+				}
 				break
 			}
 
@@ -255,12 +258,18 @@ func fetchMetrics() (err error) {
 				continue
 			}
 			name := strings.Replace(graph+"_"+key, "-", "_", -1)
-			log.Printf("%s: %f\n", name, value)
+			if !*quite {
+				log.Printf("%s: %f\n", name, value)
+			}
 			_, isGauge := gaugePerMetric[name]
 			if isGauge {
 				gaugePerMetric[name].WithLabelValues(hostname, graph, key).Set(value)
-			} else {
+				continue
+			}
+			_, isCounter := counterPerMetric[name]
+			if isCounter {
 				counterPerMetric[name].WithLabelValues(hostname, graph, key).Add(value)
+				continue
 			}
 		}
 	}
@@ -278,7 +287,9 @@ func main() {
 
 	func() {
 		for {
-			log.Printf("Scraping")
+			if !*quite {
+				log.Printf("Scraping")
+			}
 			err := fetchMetrics()
 			if err != nil {
 				log.Printf("Error occured when trying to fetch metrics: %s", err)
