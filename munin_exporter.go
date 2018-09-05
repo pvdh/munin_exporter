@@ -5,16 +5,20 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+var logger = loggo.GetLogger("main")
+var rootLogger = loggo.GetLogger("")
 
 const (
 	proto         = "tcp"
@@ -26,51 +30,51 @@ var (
 	listeningPath       = flag.String("listeningPath", "/metrics", "Path on which to expose Prometheus metrics.")
 	muninAddress        = flag.String("muninAddress", "localhost:4949", "munin-node address.")
 	muninScrapeInterval = flag.Int("muninScrapeInterval", 60, "Interval in seconds between scrapes.")
-	quiet				= flag.Bool("quiet", false, "Makes logging a bit more quiet")
+	logLevel            = flag.String("logLevel", "INFO", "TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL")
 	globalConn          net.Conn
 	hostname            string
 	graphs              []string
 	gaugePerMetric      map[string]*prometheus.GaugeVec
-	counterPerMetric    map[string]*MuninCounter
+	counterPerMetric    map[string]*muninCounter
 	muninBanner         *regexp.Regexp
 )
 
-type MuninCounter struct {
-	counterDesc *prometheus.Desc
-	value float64
-	current_labels []string
+type muninCounter struct {
+	counterDesc   *prometheus.Desc
+	value         float64
+	currentLabels []string
 }
 
-func (c *MuninCounter) Describe(ch chan<- *prometheus.Desc) {
+func (c *muninCounter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.counterDesc
 }
 
-func (c *MuninCounter) Collect(ch chan<- prometheus.Metric) {
-	if (len(c.current_labels) ==0 ) {
-		c.current_labels=[]string{"ThisMunin", "Plugin", "IsBroken"}
+func (c *muninCounter) Collect(ch chan<- prometheus.Metric) {
+	if len(c.currentLabels) == 0 {
+		c.currentLabels = []string{"ThisMunin", "Plugin", "IsBroken"}
 	}
 	ch <- prometheus.MustNewConstMetric(
 		c.counterDesc,
 		prometheus.CounterValue,
 		c.value,
-		c.current_labels...,
+		c.currentLabels...,
 	)
 }
 
-func (c *MuninCounter) Update(NewValue float64) {
-	c.value=NewValue
+func (c *muninCounter) Update(NewValue float64) {
+	c.value = NewValue
 }
-func (c *MuninCounter) UpdateLabels(current_labels []string, NewValue float64) {
-	c.value=NewValue
-	c.current_labels=current_labels
+func (c *muninCounter) UpdateLabels(currentLabels []string, NewValue float64) {
+	c.value = NewValue
+	c.currentLabels = currentLabels
 }
 
-func NewMuninCounter(metricName string, desc string, VariableLabels []string, constlabels prometheus.Labels) *MuninCounter {
-	return &MuninCounter{
+func newMuninCounter(metricName string, desc string, VariableLabels []string, constlabels prometheus.Labels) *muninCounter {
+	return &muninCounter{
 		counterDesc: prometheus.NewDesc(
 			metricName,
 			desc,
-			[]string{VariableLabels[0], VariableLabels[1],VariableLabels[2]},
+			[]string{VariableLabels[0], VariableLabels[1], VariableLabels[2]},
 			constlabels,
 		),
 	}
@@ -80,12 +84,13 @@ func init() {
 	flag.Parse()
 	var err error
 	gaugePerMetric = map[string]*prometheus.GaugeVec{}
-	counterPerMetric = map[string]*MuninCounter{}
+	counterPerMetric = map[string]*muninCounter{}
 	muninBanner = regexp.MustCompile(`# munin node at (.*)`)
-
+	loggo.ConfigureLoggers(*logLevel)
 	err = connect()
 	if err != nil {
-		log.Fatalf("Could not connect to %s: %s", *muninAddress, err)
+		rootLogger.Criticalf("Could not connect to %s: %s", *muninAddress, err)
+		os.Exit(1)
 	}
 }
 
@@ -95,12 +100,12 @@ func serveStatus() {
 }
 
 func connect() (err error) {
-	log.Printf("Connecting...")
+	rootLogger.Infof("Connecting to %s", *muninAddress)
 	globalConn, err = net.Dial(proto, *muninAddress)
 	if err != nil {
 		return
 	}
-	log.Printf("connected!")
+	rootLogger.Debugf("connected!")
 
 	reader := bufio.NewReader(globalConn)
 	head, err := reader.ReadString('\n')
@@ -113,7 +118,7 @@ func connect() (err error) {
 		return fmt.Errorf("Unexpected line: %s", head)
 	}
 	hostname = matches[1]
-	log.Printf("Found hostname: %s", hostname)
+	rootLogger.Infof("Found hostname: %s", hostname)
 	return
 }
 
@@ -125,14 +130,14 @@ func muninCommand(cmd string) (reader *bufio.Reader, err error) {
 	_, err = reader.Peek(1)
 	switch err {
 	case io.EOF:
-		log.Printf("not connected anymore, closing connection")
+		rootLogger.Infof("not connected anymore, closing connection")
 		globalConn.Close()
 		for {
 			err = connect()
 			if err == nil {
 				break
 			}
-			log.Printf("Couldn't reconnect: %s", err)
+			rootLogger.Warningf("Couldn't reconnect: %s", err)
 			time.Sleep(retryInterval * time.Second)
 		}
 
@@ -140,7 +145,8 @@ func muninCommand(cmd string) (reader *bufio.Reader, err error) {
 	case nil: //no error
 		break
 	default:
-		log.Fatalf("Unexpected error: %s", err)
+		rootLogger.Criticalf("Unexpected error: %s", err)
+		os.Exit(1)
 	}
 
 	return
@@ -149,13 +155,13 @@ func muninCommand(cmd string) (reader *bufio.Reader, err error) {
 func muninList() (items []string, err error) {
 	munin, err := muninCommand("list")
 	if err != nil {
-		log.Printf("couldn't get list")
+		rootLogger.Warningf("couldn't get list")
 		return
 	}
 
 	response, err := munin.ReadString('\n') // we are only interested in the first line
 	if err != nil {
-		log.Printf("couldn't read response")
+		rootLogger.Warningf("couldn't read response")
 		return
 	}
 
@@ -173,14 +179,14 @@ func muninConfig(name string) (config map[string]map[string]string, graphConfig 
 
 	resp, err := muninCommand("config " + name)
 	if err != nil {
-		log.Printf("couldn't get config for %s", name)
+		rootLogger.Warningf("couldn't get config for %s", name)
 		return
 	}
 
 	for {
 		line, err := resp.ReadString('\n')
 		if err == io.EOF {
-			log.Fatalf("unexpected EOF, retrying")
+			rootLogger.Criticalf("unexpected EOF, retrying")
 			return muninConfig(name)
 		}
 		if err != nil {
@@ -233,8 +239,8 @@ func registerMetrics() (err error) {
 			muninType := strings.ToLower(config["type"])
 			// muninType can be empty and defaults to gauge
 			if muninType == "counter" || muninType == "derive" {
-				gv := NewMuninCounter(metricName, desc, []string{"hostname", "graphname", "muninlabel"}, prometheus.Labels{"type": muninType})
-				log.Printf("Registered counter %s: %s", metricName, desc)
+				gv := newMuninCounter(metricName, desc, []string{"hostname", "graphname", "muninlabel"}, prometheus.Labels{"type": muninType})
+				rootLogger.Infof("Registered counter %s: %s", metricName, desc)
 				counterPerMetric[metricName] = gv
 				prometheus.Register(gv)
 
@@ -247,7 +253,7 @@ func registerMetrics() (err error) {
 					},
 					[]string{"hostname", "graphname", "muninlabel"},
 				)
-				log.Printf("Registered gauge %s: %s", metricName, desc)
+				rootLogger.Infof("Registered gauge %s: %s", metricName, desc)
 				gaugePerMetric[metricName] = gv
 				prometheus.Register(gv)
 			}
@@ -267,44 +273,39 @@ func fetchMetrics() (err error) {
 			line, err := munin.ReadString('\n')
 			line = strings.TrimRight(line, "\n")
 			if err == io.EOF {
-				log.Fatalf("unexpected EOF, retrying")
+				rootLogger.Criticalf("unexpected EOF, retrying")
 				return fetchMetrics()
 			}
 			if err != nil {
 				return err
 			}
 			if len(line) == 1 && line[0] == '.' {
-				if !*quiet {
-					log.Printf("End of list")
-				}
+				rootLogger.Debugf("End of list")
+
 				break
 			}
 
 			parts := strings.Fields(line)
 			if len(parts) != 2 {
-				log.Printf("unexpected line: %s", line)
+				rootLogger.Debugf("unexpected line: %s", line)
 				continue
 			}
 			key, valueString := strings.Split(parts[0], ".")[0], parts[1]
 			value, err := strconv.ParseFloat(valueString, 64)
 			if err != nil {
-				log.Printf("Couldn't parse value in line %s, malformed?", line)
+				rootLogger.Warningf("Couldn't parse value in line %s, malformed?", line)
 				continue
 			}
 			name := strings.Replace(graph+"_"+key, "-", "_", -1)
 			_, isGauge := gaugePerMetric[name]
 			if isGauge {
 				gaugePerMetric[name].WithLabelValues(hostname, graph, key).Set(value)
-				if !*quiet {
-					log.Printf("Gauge %s: %f\n", name, value)
-				}
+				rootLogger.Debugf("Gauge %s: %f\n", name, value)
 				continue
 			}
 			_, isCounter := counterPerMetric[name]
 			if isCounter {
-				if !*quiet {
-					log.Printf("Counter %s: %f\n", name, value)
-				}
+				rootLogger.Debugf("Counter %s: %f\n", name, value)
 				counterPerMetric[name].UpdateLabels([]string{hostname, graph, key}, value)
 				continue
 			}
@@ -317,19 +318,18 @@ func main() {
 	flag.Parse()
 	err := registerMetrics()
 	if err != nil {
-		log.Fatalf("Could not register metrics: %s", err)
+		rootLogger.Criticalf("Could not register metrics: %s", err)
+		os.Exit(1)
 	}
 
 	go serveStatus()
 
 	func() {
 		for {
-			if !*quiet {
-				log.Printf("Scraping")
-			}
+			rootLogger.Debugf("Scrapping")
 			err := fetchMetrics()
 			if err != nil {
-				log.Printf("Error occured when trying to fetch metrics: %s", err)
+				rootLogger.Warningf("Error occured when trying to fetch metrics: %s", err)
 			}
 			time.Sleep(time.Duration(*muninScrapeInterval) * time.Second)
 		}
