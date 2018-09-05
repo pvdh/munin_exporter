@@ -26,20 +26,61 @@ var (
 	listeningPath       = flag.String("listeningPath", "/metrics", "Path on which to expose Prometheus metrics.")
 	muninAddress        = flag.String("muninAddress", "localhost:4949", "munin-node address.")
 	muninScrapeInterval = flag.Int("muninScrapeInterval", 60, "Interval in seconds between scrapes.")
-	quite				= flag.Bool("quite", false, "Makes logging a bit more quite")
+	quiet				= flag.Bool("quiet", false, "Makes logging a bit more quiet")
 	globalConn          net.Conn
 	hostname            string
 	graphs              []string
 	gaugePerMetric      map[string]*prometheus.GaugeVec
-	counterPerMetric    map[string]*prometheus.CounterVec
+	counterPerMetric    map[string]*MuninCounter
 	muninBanner         *regexp.Regexp
 )
+
+type MuninCounter struct {
+	counterDesc *prometheus.Desc
+	value float64
+	current_labels []string
+}
+
+func (c *MuninCounter) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.counterDesc
+}
+
+func (c *MuninCounter) Collect(ch chan<- prometheus.Metric) {
+	if (len(c.current_labels) ==0 ) {
+		c.current_labels=[]string{"ThisMunin", "Plugin", "IsBroken"}
+	}
+	ch <- prometheus.MustNewConstMetric(
+		c.counterDesc,
+		prometheus.CounterValue,
+		c.value,
+		c.current_labels...,
+	)
+}
+
+func (c *MuninCounter) Update(NewValue float64) {
+	c.value=NewValue
+}
+func (c *MuninCounter) UpdateLabels(current_labels []string, NewValue float64) {
+	c.value=NewValue
+	c.current_labels=current_labels
+}
+
+func NewMuninCounter(metricName string, desc string, VariableLabels []string, constlabels prometheus.Labels) *MuninCounter {
+	return &MuninCounter{
+		counterDesc: prometheus.NewDesc(
+			metricName,
+			desc,
+			[]string{VariableLabels[0], VariableLabels[1],VariableLabels[2]},
+			constlabels,
+		),
+	}
+}
 
 func init() {
 	flag.Parse()
 	var err error
 	gaugePerMetric = map[string]*prometheus.GaugeVec{}
-	counterPerMetric = map[string]*prometheus.CounterVec{}
+	counterPerMetric = map[string]*MuninCounter{}
 	muninBanner = regexp.MustCompile(`# munin node at (.*)`)
 
 	err = connect()
@@ -192,14 +233,7 @@ func registerMetrics() (err error) {
 			muninType := strings.ToLower(config["type"])
 			// muninType can be empty and defaults to gauge
 			if muninType == "counter" || muninType == "derive" {
-				gv := prometheus.NewCounterVec(
-					prometheus.CounterOpts{
-						Name:        metricName,
-						Help:        desc,
-						ConstLabels: prometheus.Labels{"type": muninType},
-					},
-					[]string{"hostname", "graphname", "muninlabel"},
-				)
+				gv := NewMuninCounter(metricName, desc, []string{"hostname", "graphname", "muninlabel"}, prometheus.Labels{"type": muninType})
 				log.Printf("Registered counter %s: %s", metricName, desc)
 				counterPerMetric[metricName] = gv
 				prometheus.Register(gv)
@@ -240,7 +274,7 @@ func fetchMetrics() (err error) {
 				return err
 			}
 			if len(line) == 1 && line[0] == '.' {
-				if !*quite {
+				if !*quiet {
 					log.Printf("End of list")
 				}
 				break
@@ -258,17 +292,20 @@ func fetchMetrics() (err error) {
 				continue
 			}
 			name := strings.Replace(graph+"_"+key, "-", "_", -1)
-			if !*quite {
-				log.Printf("%s: %f\n", name, value)
-			}
 			_, isGauge := gaugePerMetric[name]
 			if isGauge {
 				gaugePerMetric[name].WithLabelValues(hostname, graph, key).Set(value)
+				if !*quiet {
+					log.Printf("Gauge %s: %f\n", name, value)
+				}
 				continue
 			}
 			_, isCounter := counterPerMetric[name]
 			if isCounter {
-				counterPerMetric[name].WithLabelValues(hostname, graph, key).Add(value)
+				if !*quiet {
+					log.Printf("Counter %s: %f\n", name, value)
+				}
+				counterPerMetric[name].UpdateLabels([]string{hostname, graph, key}, value)
 				continue
 			}
 		}
@@ -287,7 +324,7 @@ func main() {
 
 	func() {
 		for {
-			if !*quite {
+			if !*quiet {
 				log.Printf("Scraping")
 			}
 			err := fetchMetrics()
