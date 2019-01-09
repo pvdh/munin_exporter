@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"sync"
 	"flag"
 	"fmt"
 	"io"
@@ -12,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
+	"runtime"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -21,8 +22,11 @@ var logger = loggo.GetLogger("main")
 var rootLogger = loggo.GetLogger("")
 
 const (
-	proto         = "tcp"
-	retryInterval = 1
+	proto           = "tcp"
+	retryInterval   = 1
+	version_string	= "Munin Exporter version 0.2.1"
+	version_num		= "0.2.1"
+	revision		= "0.2.1"
 )
 
 var (
@@ -31,19 +35,23 @@ var (
 	muninAddress        = flag.String("muninAddress", "localhost:4949", "munin-node address.")
 	muninScrapeInterval = flag.Int("muninScrapeInterval", 60, "Interval in seconds between scrapes.")
 	logLevel            = flag.String("logLevel", "INFO", "TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL")
+	version             = flag.Bool("version", false, "Show application version")
 	globalConn          net.Conn
 	hostname            string
 	graphs              []string
 	gaugePerMetric      map[string]*prometheus.GaugeVec
 	counterPerMetric    map[string]*muninCounter
 	muninBanner         *regexp.Regexp
+	wg					= &sync.WaitGroup{}
 )
 
 type muninCounter struct {
 	counterDesc   *prometheus.Desc
 	value         float64
 	currentLabels []string
+
 }
+
 
 func (c *muninCounter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.counterDesc
@@ -82,6 +90,10 @@ func newMuninCounter(metricName string, desc string, VariableLabels []string, co
 
 func init() {
 	flag.Parse()
+	if (*version) {
+		fmt.Println(version_string)
+		os.Exit(1)
+	}
 	var err error
 	gaugePerMetric = map[string]*prometheus.GaugeVec{}
 	counterPerMetric = map[string]*muninCounter{}
@@ -95,7 +107,11 @@ func init() {
 }
 
 func serveStatus() {
-	http.Handle(*listeningPath, prometheus.Handler())
+	prom := prometheus.Handler()
+	http.HandleFunc(*listeningPath, func(res http.ResponseWriter, req *http.Request){
+		wg.Wait();
+		prom.ServeHTTP(res, req)
+	})
 	http.ListenAndServe(*listeningAddress, nil)
 }
 
@@ -259,10 +275,23 @@ func registerMetrics() (err error) {
 			}
 		}
 	}
+	version_metric := prometheus.NewGaugeVec(
+                prometheus.GaugeOpts{
+                        Name:      "munin_exporter_build_info",
+                        Help: fmt.Sprintf(
+                                "A metric with a constant '1' value labeled by version, revision, branch, and goversion from which %s was built.",
+                                version_string,
+                        ),
+                },
+                []string{"version", "goversion"},
+        )
+    version_metric.WithLabelValues(version_num, runtime.Version()).Set(1)
+	prometheus.Register(version_metric)
 	return nil
 }
 
 func fetchMetrics() (err error) {
+	wg.Add(1)
 	for _, graph := range graphs {
 		munin, err := muninCommand("fetch " + graph)
 		if err != nil {
@@ -311,6 +340,7 @@ func fetchMetrics() (err error) {
 			}
 		}
 	}
+	wg.Done()
 	return
 }
 
@@ -325,13 +355,13 @@ func main() {
 	go serveStatus()
 
 	func() {
-		for {
+		ticker := time.NewTicker(time.Duration(*muninScrapeInterval)*time.Second)
+		for range ticker.C {
 			rootLogger.Debugf("Scrapping")
 			err := fetchMetrics()
 			if err != nil {
 				rootLogger.Warningf("Error occured when trying to fetch metrics: %s", err)
 			}
-			time.Sleep(time.Duration(*muninScrapeInterval) * time.Second)
 		}
 	}()
 }
