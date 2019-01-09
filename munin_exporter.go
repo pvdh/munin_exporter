@@ -287,11 +287,22 @@ func registerMetrics() (err error) {
         )
     version_metric.WithLabelValues(version_num, runtime.Version()).Set(1)
 	prometheus.Register(version_metric)
+	gv := prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name:	"munin_exporter_munin_data_fetch_time",
+				Help:	"A metric showing the amount of time it takes to get all the data from munin and it's plugins",
+				ConstLabels: prometheus.Labels{"type": "gauge"},
+			},
+			[]string{"hostname"},
+		)
+	gaugePerMetric["munin_fetching_metric"] = gv
+	prometheus.Register(gv)
 	return nil
 }
 
 func fetchMetrics() (err error) {
 	wg.Add(1)
+	start := time.Now()
 	for _, graph := range graphs {
 		munin, err := muninCommand("fetch " + graph)
 		if err != nil {
@@ -340,6 +351,7 @@ func fetchMetrics() (err error) {
 			}
 		}
 	}
+	gaugePerMetric["munin_fetching_metric"].WithLabelValues(hostname).Set(time.Since(start).Seconds())
 	wg.Done()
 	return
 }
