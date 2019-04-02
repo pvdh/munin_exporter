@@ -112,7 +112,9 @@ func serveStatus() {
 		wg.Wait();
 		prom.ServeHTTP(res, req)
 	})
-	http.ListenAndServe(*listeningAddress, nil)
+	if err := http.ListenAndServe(*listeningAddress, nil); err != nil {
+		panic(err)
+	}
 }
 
 func connect() (err error) {
