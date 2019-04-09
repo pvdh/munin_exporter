@@ -24,8 +24,8 @@ var rootLogger = loggo.GetLogger("")
 const (
 	proto           = "tcp"
 	retryInterval   = 1
-	version_string	= "Munin Exporter version 0.2.1"
-	version_num		= "0.2.1"
+	version_string	= "Munin Exporter version 0.2.2"
+	version_num		= "0.2.2"
 	revision		= "0.2.1"
 )
 
@@ -305,6 +305,7 @@ func registerMetrics() (err error) {
 func fetchMetrics() (err error) {
 	wg.Add(1)
 	start := time.Now()
+	defer wg.Done()
 	for _, graph := range graphs {
 		munin, err := muninCommand("fetch " + graph)
 		if err != nil {
@@ -315,7 +316,7 @@ func fetchMetrics() (err error) {
 			line, err := munin.ReadString('\n')
 			line = strings.TrimRight(line, "\n")
 			if err == io.EOF {
-				rootLogger.Criticalf("unexpected EOF, retrying")
+				rootLogger.Criticalf("unexpected EOF while fetching "+graph+", retrying")
 				return fetchMetrics()
 			}
 			if err != nil {
@@ -354,7 +355,6 @@ func fetchMetrics() (err error) {
 		}
 	}
 	gaugePerMetric["munin_fetching_metric"].WithLabelValues(hostname).Set(time.Since(start).Seconds())
-	wg.Done()
 	return
 }
 
