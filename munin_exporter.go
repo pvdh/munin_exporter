@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
@@ -48,7 +49,7 @@ func init() {
 }
 
 func serveStatus() {
-	http.Handle(*listeningPath, prometheus.Handler())
+	http.Handle(*listeningPath, promhttp.Handler())
 	http.ListenAndServe(*listeningAddress, nil)
 }
 
